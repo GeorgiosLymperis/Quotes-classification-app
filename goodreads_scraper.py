@@ -4,7 +4,7 @@ from urllib.parse import urljoin
 from typing import List
 
 class GoodReadsScraper(BaseScraper):
-    def scrape_page(self, url: str)->List[dict]:
+    def scrape_page(self, url: str, save: bool = False)->List[dict]:
         page = self.get_page(url)
         soup = self.parse_page(page)
         quotes = []
@@ -16,6 +16,9 @@ class GoodReadsScraper(BaseScraper):
                 'tags': self.get_tags(block),
                 'likes': self.get_likes(block)
             })
+
+        if save == True:
+            self._save(quotes, 'quotes_qr.pkl')
         return quotes
     @staticmethod
     def get_quote(block)->str:
@@ -40,20 +43,23 @@ class GoodReadsScraper(BaseScraper):
             tags.append(tag.get_text())
         return tags[:-1]
     
-    def scrape_many_pages(self, url: str, start_page: int, end_page: int)->List[dict]:
+    def scrape_many_pages(self, url: str, start_page: int, end_page: int, save: bool = False)->List[dict]:
         quotes = []
-        with ThreadPoolExecutor() as executor:
+        with ThreadPoolExecutor(max_workers=10) as executor:
             futures = []
-            for url in self.__generate_pages(url, start_page, end_page):
-                future = executor.submit(self.scrape_page, url)
+            for page in self.__generate_pages(url, start_page, end_page):
+                future = executor.submit(self.scrape_page, page)
                 futures.append(future)
 
             for future in as_completed(futures):
                 quotes.extend(future.result())
 
+        if save == True:
+            self._save(quotes, 'quotes_qr.pkl')
+
         return quotes
     
-    def scrape_topics(self)->List[str]:
+    def scrape_topics(self, save: bool = False)->List[str]:
         url = 'https://www.goodreads.com/quotes'
         response = self.get_page(url)
         soup = self.parse_page(response)
@@ -63,6 +69,9 @@ class GoodReadsScraper(BaseScraper):
             topic_url = topic.find('a').get('href')
             topic_url = urljoin(url, topic_url)
             topics.append((topic_of_quote, topic_url))
+
+        if save == True:
+            self._save(topics, 'topics_qr.pkl')
         return topics
     
     def __generate_pages(self, url, start_page, end_page):
@@ -73,5 +82,5 @@ class GoodReadsScraper(BaseScraper):
 if __name__ == '__main__':
     url = 'https://www.goodreads.com/quotes/tag/motivational-quotes'
     scraper = GoodReadsScraper()
-    quotes = scraper.scrape_page(url)
+    quotes = scraper.scrape_page(url, save=True)
     print(quotes)

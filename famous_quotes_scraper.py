@@ -2,7 +2,7 @@ from base_scraper import BaseScraper
 from urllib.parse import urljoin
 
 class FamousQuotesScraper(BaseScraper):
-    def scrape_page(self, url):
+    def scrape_page(self, url, save=False):
         page = self.get_page(url)
         soup = self.parse_page(page)
         table = soup.find('td', style='padding-left:16px; padding-right:16px;', valign='top')
@@ -11,12 +11,16 @@ class FamousQuotesScraper(BaseScraper):
         likes = None
         tag = self.get_tags(table)
         assert len(quotes) == len(authors)
-        return [{
+        quotes = [{
             'quote': quote,
             'author': author,
             'tags': tag,
             'likes': likes
         } for quote, author in zip(quotes, authors)]
+
+        if save == True:
+            self._save(quotes, 'quotes_fq.pkl')
+        return  quotes
 
     @staticmethod
     def get_quote(table):
@@ -47,7 +51,7 @@ class FamousQuotesScraper(BaseScraper):
     def get_likes(table):
         return None
     
-    def scrape_topics(self):
+    def scrape_topics(self, save=False):
         url = 'http://www.famousquotesandauthors.com/quotes_by_topic.html'
         base_quote_url = 'http://www.famousquotesandauthors.com'
         response = self.get_page(url)
@@ -59,9 +63,11 @@ class FamousQuotesScraper(BaseScraper):
             url = urljoin(base_quote_url, url)
             topics.append((topic, url))
 
+        if save == True:
+            self._save(topics, 'topics_fq.pkl')
         return topics
 
-    def scrape_authors(self):
+    def scrape_authors(self, save=False):
         url = 'http://www.famousquotesandauthors.com/quotes_by_author.html'
         base_author_url = 'http://www.famousquotesandauthors.com'
         response = self.get_page(url)
@@ -73,6 +79,8 @@ class FamousQuotesScraper(BaseScraper):
             url = urljoin(base_author_url, url)
             authors.append((author, url))
 
+        if save == True:
+            self._save(authors, 'authors_fq.pkl')
         return authors
     
 if __name__ == "__main__":

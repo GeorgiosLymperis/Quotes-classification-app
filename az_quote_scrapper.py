@@ -4,7 +4,7 @@ from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class AzQuoteScraper(BaseScraper):
-    def scrape_page(self, url):
+    def scrape_page(self, url, save: bool = False):
         page = self.get_page(url)
         soup = self.parse_page(page)
         quotes = []
@@ -15,14 +15,20 @@ class AzQuoteScraper(BaseScraper):
                 'tags': self.get_tags(block),
                 'likes': self.get_likes(block)
             })
+
+        if save == True:
+            self._save(quotes, 'quotes_az.pkl')        
         return quotes
+    
     @staticmethod
     def get_quote(block):
         return block.find('a', class_='title').get_text()
+    
     @staticmethod
     def get_author(block):
         author_tag = block.find('div', class_='author').get_text(strip=True)
         return author_tag if author_tag else 'Unknown'
+    
     @staticmethod
     def get_tags(block):
         tags = []
@@ -36,7 +42,7 @@ class AzQuoteScraper(BaseScraper):
         icons = block.find('div', class_='share-icons')
         return icons.find('a', class_='heart24 heart24-off').get_text()
     
-    def scrape_topics_by_letter(self, letter):
+    def scrape_topics_by_letter(self, letter, save=False):
         url = 'https://www.azquotes.com/quotes/tags/{}/'
         quote_url = 'https://www.azquotes.com'
 
@@ -52,9 +58,12 @@ class AzQuoteScraper(BaseScraper):
             if topic_of_quote:
                 topics.append((topic_of_quote, urljoin(quote_url, topic_url)))
 
+        if save == True:
+            self._save(topics, 'topics_az.pkl')
+
         return topics
     
-    def scrape_topics(self):
+    def scrape_topics(self, save=False):
         topics = []
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = []
@@ -65,9 +74,12 @@ class AzQuoteScraper(BaseScraper):
             for future in as_completed(futures):
                 topics.extend(future.result())
 
+        if save == True:
+            self._save(topics, 'topics_az.pkl')
+
         return topics
     
-    def scrape_authors_page(self, letter, number):
+    def scrape_authors_page(self, letter, number, save=False):
         url = 'https://www.azquotes.com/quotes/authors/{}/'
         quote_url = 'https://www.azquotes.com'
 
@@ -84,9 +96,11 @@ class AzQuoteScraper(BaseScraper):
             name, profession, birthday = [column.text.strip() for column in columns]
             authors_of_page.append((name, author_url, profession, birthday))
 
+        if save == True:
+            self._save(authors_of_page, 'authors.pkl')
         return authors_of_page
     
-    def scrape_authors(self):
+    def scrape_authors(self, save=False):
         authors = []
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = []
@@ -103,9 +117,11 @@ class AzQuoteScraper(BaseScraper):
             for future in as_completed(futures):
                 authors.extend(future.result())
 
+        if save == True:
+            self._save(authors, 'authors.pkl')
         return authors
     
-    def scrape_many_pages(self, url, start_page, end_page):
+    def scrape_many_pages(self, url, start_page, end_page, save=False):
         quotes = []
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = []
@@ -116,6 +132,8 @@ class AzQuoteScraper(BaseScraper):
             for future in as_completed(futures):
                 quotes.extend(future.result())
 
+        if save == True:
+            self._save(quotes, 'quotes.pkl')
         return quotes
             
     def __generate_pages(self, url, start_page, end_page):
