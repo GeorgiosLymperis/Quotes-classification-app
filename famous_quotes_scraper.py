@@ -1,5 +1,7 @@
 from base_scraper import BaseScraper
 from urllib.parse import urljoin
+from typing import List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class FamousQuotesScraper(BaseScraper):
     def scrape_page(self, url, save=False):
@@ -34,9 +36,8 @@ class FamousQuotesScraper(BaseScraper):
     def get_author(table):
         authors = []
         for author in table.find_all('div', style='padding-top:2px;'):
-            url = author.find('a').get('href')
             author_name = author.find('a').get_text(strip=True)
-            authors.append((author_name, url))
+            authors.append(author_name)
 
         return authors
     
@@ -61,7 +62,7 @@ class FamousQuotesScraper(BaseScraper):
             topic = topic_block.find('a').get_text(strip=True)
             url = topic_block.find('a').get('href')
             url = urljoin(base_quote_url, url)
-            topics.append((topic, url))
+            topics.append({'topic': topic,'url': url})
 
         if save == True:
             self._save(topics, 'topics_fq.pkl')
@@ -77,11 +78,26 @@ class FamousQuotesScraper(BaseScraper):
             author = author_block.find('a').get_text(strip=True)
             url = author_block.find('a').get('href')
             url = urljoin(base_author_url, url)
-            authors.append((author, url))
+            authors.append({'author': author,'url': url})
 
         if save == True:
             self._save(authors, 'authors_fq.pkl')
         return authors
+    
+    def scrape_many_pages(self, urls: List[str], save: bool = False):
+        quotes = []
+        futures = []
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            for url in urls:
+                future = executor.submit(self.scrape_page, url)
+                futures.append(future)
+
+            for future in as_completed(futures):
+                quotes.extend(future.result())
+
+        if save == True:
+            self._save(quotes, 'quotes_fq.pkl')
+        return quotes
     
 if __name__ == "__main__":
     url = 'http://www.famousquotesandauthors.com/topics/worthy_victories_quotes.html'
