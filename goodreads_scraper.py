@@ -1,6 +1,5 @@
 from base_scraper import BaseScraper
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import urljoin
 from typing import List
 
 class GoodReadsScraper(BaseScraper):
@@ -43,13 +42,14 @@ class GoodReadsScraper(BaseScraper):
             tags.append(tag.get_text())
         return tags[:-1]
     
-    def scrape_many_pages(self, url: str, start_page: int, end_page: int, save: bool = False)->List[dict]:
+    def scrape_many_pages(self, urls: List[str], start_page: int, end_page: int, save: bool = False)->List[dict]:
         quotes = []
+        futures = []
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = []
-            for page in self.__generate_pages(url, start_page, end_page):
-                future = executor.submit(self.scrape_page, page)
-                futures.append(future)
+            for url in urls:
+                for page in self.__generate_pages(url, start_page, end_page):
+                    future = executor.submit(self.scrape_page, page)
+                    futures.append(future)
 
             for future in as_completed(futures):
                 quotes.extend(future.result())
@@ -67,17 +67,17 @@ class GoodReadsScraper(BaseScraper):
         for topic in soup.find_all('li', class_='greyText'):
             topic_of_quote = topic.get_text(strip=True).split(' ')[0]
             topic_url = topic.find('a').get('href')
-            topic_url = urljoin(url, topic_url)
-            topics.append((topic_of_quote, topic_url))
+            topic_url = 'https://www.goodreads.com' + topic_url
+            topics.append({'topic': topic_of_quote,'url': topic_url})
 
         if save == True:
             self._save(topics, 'topics_qr.pkl')
         return topics
     
     def __generate_pages(self, url, start_page, end_page):
-        base_url = urljoin(url, '?page=')
+        base_url = f"{url}?page="
         for i in range(start_page, end_page + 1):
-            yield urljoin(base_url, str(i))
+            yield base_url + str(i)
 
 if __name__ == '__main__':
     url = 'https://www.goodreads.com/quotes/tag/motivational-quotes'
