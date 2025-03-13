@@ -1,10 +1,29 @@
 from base_scraper import BaseScraper
 from urllib.parse import urljoin
-from typing import List
+from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class FamousQuotesScraper(BaseScraper):
-    def scrape_page(self, url, save=False):
+    """
+    A web scraper for extracting quotes, topics, and authors from FamousQuotesAndAuthors.com.
+
+    This scraper supports:
+    - Scraping individual pages for quotes
+    - Extracting topics and associated URLs
+    - Scraping author names and their respective URLs
+    - Multi-threaded scraping for efficiency
+    """
+    def scrape_page(self, url: str, save: bool=False)->List[Dict[str, str]]:
+        """
+        Scrapes a single page for quotes, extracting relevant details such as the quote, author, tags, and likes.
+
+        Args:
+            url (str): The URL of the page to scrape.
+            save (bool): If True, saves the extracted quotes to a pickle file.
+
+        Returns:
+            List[Dict[str, str]]: A list of dictionaries containing the quote, author, tags, and likes.
+        """
         page = self.get_page(url)
         soup = self.parse_page(page)
         table = soup.find('td', style='padding-left:16px; padding-right:16px;', valign='top')
@@ -25,7 +44,16 @@ class FamousQuotesScraper(BaseScraper):
         return  quotes
 
     @staticmethod
-    def get_quote(table):
+    def get_quote(table)->List[str]:
+        """
+        Extracts quote text from a given HTML table.
+
+        Args:
+            table (BeautifulSoup element): The table containing quotes.
+
+        Returns:
+            List[str]: A list of extracted quotes.
+        """
         quotes = []
         for quote in table.find_all('div', style='font-size:12px;font-family:Arial;'):
             quotes.append(quote.get_text(strip=True))
@@ -33,7 +61,16 @@ class FamousQuotesScraper(BaseScraper):
         return quotes
     
     @staticmethod
-    def get_author(table):
+    def get_author(table)->List[str]:
+        """
+        Extracts author names from a given HTML table.
+
+        Args:
+            table (BeautifulSoup element): The table containing author names.
+
+        Returns:
+            List[str]: A list of extracted author names.
+        """
         authors = []
         for author in table.find_all('div', style='padding-top:2px;'):
             author_name = author.find('a').get_text(strip=True)
@@ -42,7 +79,16 @@ class FamousQuotesScraper(BaseScraper):
         return authors
     
     @staticmethod
-    def get_tags(table):
+    def get_tags(table)->str:
+        """
+        Extracts the topic tag from a given HTML table.
+
+        Args:
+            table (BeautifulSoup element): The table containing tag information.
+
+        Returns:
+            str: The extracted topic tag.
+        """
         tag = table.find('div', style='padding-top:10px;font-size:19px;font-family:Times New Roman;color:#347070;').get_text(strip=True)
         idx = tag.index(' Quote')
         tag = tag[:idx]
@@ -50,9 +96,27 @@ class FamousQuotesScraper(BaseScraper):
     
     @staticmethod
     def get_likes(table):
+        """
+        Extracts the number of likes for a quote (not available in this scraper).
+
+        Args:
+            table (BeautifulSoup element): The table containing like information.
+
+        Returns:
+            None: Since likes are not available on this website.
+        """
         return None
     
-    def scrape_topics(self, save=False):
+    def scrape_topics(self, save: bool=False)->List[Dict[str, str]]:
+        """
+        Scrapes all available topics and their URLs from the website.
+
+        Args:
+            save (bool): If True, saves the extracted topics to a pickle file.
+
+        Returns:
+            List[Dict[str, str]]: A list of dictionaries containing topic names and URLs.
+        """
         url = 'http://www.famousquotesandauthors.com/quotes_by_topic.html'
         base_quote_url = 'http://www.famousquotesandauthors.com'
         response = self.get_page(url)
@@ -68,7 +132,16 @@ class FamousQuotesScraper(BaseScraper):
             self._save(topics, 'topics_fq.pkl')
         return topics
 
-    def scrape_authors(self, save=False):
+    def scrape_authors(self, save: bool=False)->List[Dict[str, str]]:
+        """
+        Scrapes all authors and their respective URLs from the website.
+
+        Args:
+            save (bool): If True, saves the extracted author data to a pickle file.
+
+        Returns:
+            List[Dict[str, str]]: A list of dictionaries containing author names and URLs.
+        """
         url = 'http://www.famousquotesandauthors.com/quotes_by_author.html'
         base_author_url = 'http://www.famousquotesandauthors.com'
         response = self.get_page(url)
@@ -84,7 +157,17 @@ class FamousQuotesScraper(BaseScraper):
             self._save(authors, 'authors_fq.pkl')
         return authors
     
-    def scrape_many_pages(self, urls: List[str], save: bool = False):
+    def scrape_many_pages(self, urls: List[str], save: bool = False)->List[Dict[str, str]]:
+        """
+        Scrapes multiple pages concurrently and extracts quotes.
+
+        Args:
+            urls (List[str]): A list of URLs to scrape.
+            save (bool): If True, saves the extracted data to a pickle file.
+
+        Returns:
+            List[Dict[str, str]]: A list of dictionaries containing quote data from all pages.
+        """
         quotes = []
         futures = []
         with ThreadPoolExecutor(max_workers=10) as executor:
@@ -98,9 +181,3 @@ class FamousQuotesScraper(BaseScraper):
         if save == True:
             self._save(quotes, 'quotes_fq.pkl')
         return quotes
-    
-if __name__ == "__main__":
-    url = 'http://www.famousquotesandauthors.com/topics/worthy_victories_quotes.html'
-    scraper = FamousQuotesScraper()
-    authors = scraper.scrape_authors()
-    print(authors)

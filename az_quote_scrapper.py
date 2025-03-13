@@ -1,9 +1,30 @@
 from base_scraper import BaseScraper
 from string import ascii_lowercase
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List
 
 class AzQuoteScraper(BaseScraper):
-    def scrape_page(self, url, save: bool = False):
+    """
+    A web scraper for AZQuotes that extracts quotes, topics, and authors from the site.
+    
+    This scraper supports:
+    - Scraping individual pages for quotes
+    - Extracting topics by letter
+    - Scraping author details with multi-threading
+    - Handling pagination for multiple pages
+    - Saving extracted data as JSON or pickle
+    """
+    def scrape_page(self, url: str, save: bool = False):
+        """
+        Scrapes a single page for quotes and extracts relevant information.
+
+        Args:
+            url (str): The URL of the page to scrape.
+            save (bool): If True, saves the data to a pickle file.
+
+        Returns:
+            list: A list of dictionaries containing quote data.
+        """
         page = self.get_page(url)
         soup = self.parse_page(page)
         quotes = []
@@ -21,15 +42,42 @@ class AzQuoteScraper(BaseScraper):
     
     @staticmethod
     def get_quote(block):
+        """
+        Extracts the quote text from a quote block.
+
+        Args:
+            block (BeautifulSoup element): The block containing the quote.
+
+        Returns:
+            str: The extracted quote text.
+        """
         return block.find('a', class_='title').get_text()
     
     @staticmethod
     def get_author(block):
+        """
+        Extracts the author of the quote.
+
+        Args:
+            block (BeautifulSoup element): The block containing the author.
+
+        Returns:
+            str: The extracted author name, or 'Unknown' if not found.
+        """
         author_tag = block.find('div', class_='author').get_text(strip=True)
         return author_tag if author_tag else 'Unknown'
     
     @staticmethod
     def get_tags(block):
+        """
+        Extracts the tags associated with a quote.
+
+        Args:
+            block (BeautifulSoup element): The block containing tags.
+
+        Returns:
+            list: A list of tag strings.
+        """
         tags = []
         tags_block = block.find('div', class_='mytags')
         for tag in tags_block.find_all('a'):
@@ -38,10 +86,29 @@ class AzQuoteScraper(BaseScraper):
         return tags
     @staticmethod
     def get_likes(block):
+        """
+        Extracts the number of likes for a quote.
+
+        Args:
+            block (BeautifulSoup element): The block containing likes.
+
+        Returns:
+            str: The number of likes as a string.
+        """
         icons = block.find('div', class_='share-icons')
         return icons.find('a', class_='heart24 heart24-off').get_text()
     
-    def scrape_topics_by_letter(self, letter, save=False):
+    def scrape_topics_by_letter(self, letter: str, save: bool = False):
+        """
+        Scrapes topics that start with a specific letter.
+
+        Args:
+            letter (str): The letter for which topics should be scraped.
+            save (bool): If True, saves the data to a pickle file.
+
+        Returns:
+            list: A list of dictionaries containing topic names and URLs.
+        """
         url = 'https://www.azquotes.com/quotes/tags/{}/'
         quote_url = 'https://www.azquotes.com'
 
@@ -62,7 +129,16 @@ class AzQuoteScraper(BaseScraper):
 
         return topics
     
-    def scrape_topics(self, save=False):
+    def scrape_topics(self, save: bool=False):
+        """
+        Scrapes all available topics from AZQuotes.
+
+        Args:
+            save (bool): If True, saves the data to a pickle file.
+
+        Returns:
+            list: A list of topic dictionaries.
+        """
         topics = []
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = []
@@ -78,7 +154,18 @@ class AzQuoteScraper(BaseScraper):
 
         return topics
     
-    def scrape_authors_page(self, letter, number, save=False):
+    def scrape_authors_page(self, letter: str, number: int, save=False):
+        """
+        Scrapes a specific page of authors for a given letter.
+
+        Args:
+            letter (str): The letter for author names.
+            number (int): The page number to scrape.
+            save (bool): If True, saves the data to a pickle file.
+
+        Returns:
+            list: A list of dictionaries containing author data.
+        """
         url = 'https://www.azquotes.com/quotes/authors/{}/'
         quote_url = 'https://www.azquotes.com'
 
@@ -99,7 +186,16 @@ class AzQuoteScraper(BaseScraper):
             self._save(authors_of_page, 'authors.pkl')
         return authors_of_page
     
-    def __find_num_of_pages(self, url):
+    def __find_num_of_pages(self, url: str) -> int:
+        """
+        Determines the number of available pages for a given URL.
+
+        Args:
+            url (str): The URL to check.
+
+        Returns:
+            int: The number of pages available.
+        """
         response = self.get_page(url)
         soup = self.parse_page(response)
         pager_div = soup.find('div', class_='pager')
@@ -114,7 +210,16 @@ class AzQuoteScraper(BaseScraper):
 
         return num_of_pages
     
-    def scrape_authors(self, save=False):
+    def scrape_authors(self, save: bool=False):
+        """
+        Scrapes all authors listed on AZQuotes.
+
+        Args:
+            save (bool): If True, saves the data to a pickle file.
+
+        Returns:
+            list: A list of author dictionaries.
+        """
         authors = []
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = []
@@ -133,7 +238,22 @@ class AzQuoteScraper(BaseScraper):
             self._save(authors, 'authors_az.pkl')
         return authors
     
-    def scrape_many_pages(self, urls, start_page, end_page, save=False):
+    def scrape_many_pages(self, urls:List[str], start_page: int, end_page: int, save: bool=False):
+        """
+        Scrapes multiple paginated URLs concurrently and extracts quotes.
+
+        This method handles pagination dynamically, submitting scraping tasks 
+        for each page across multiple URLs using threading.
+
+        Args:
+            urls (list): A list of base URLs to scrape.
+            start_page (int): The starting page number for pagination.
+            end_page (int): The last page number to scrape.
+            save (bool): If True, saves the extracted data to a pickle file.
+
+        Returns:
+            list: A list of dictionaries containing quote data from all pages.
+        """
         quotes = []
         futures = []
         len_urls = len(urls)
@@ -151,16 +271,23 @@ class AzQuoteScraper(BaseScraper):
             self._save(quotes, 'quotes.pkl')
         return quotes
             
-    def __generate_pages(self, url, start_page, end_page):
+    def __generate_pages(self, url: str, start_page: int, end_page: int):
+        """
+        Generates a list of paginated URLs for a given base URL.
+
+        This method ensures that the generated page range does not exceed the 
+        available number of pages on the website.
+
+        Args:
+            url (str): The base URL for pagination.
+            start_page (int): The starting page number.
+            end_page (int): The last page number to scrape.
+
+        Returns:
+            list: A list of fully constructed paginated URLs.
+        """
         num_of_pages = self.__find_num_of_pages(url)
         end_page = num_of_pages if end_page > num_of_pages else end_page
         base_url = f'{url}?p='
         for i in range(start_page, end_page + 1):
             yield base_url + str(i)
-
-
-if __name__ == '__main__':
-    url = 'https://www.azquotes.com/quotes/authors/p/22'
-    scraper = AzQuoteScraper()
-    quotes = scraper.scrape_authors_page('p', 25)
-    print(quotes)
