@@ -1,6 +1,5 @@
 from base_scraper import BaseScraper
 from string import ascii_lowercase
-from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class AzQuoteScraper(BaseScraper):
@@ -56,7 +55,7 @@ class AzQuoteScraper(BaseScraper):
             topic_of_quote = topic.find('a').get_text(strip=True)
             topic_url = topic.find('a').get('href')
             if topic_of_quote:
-                topics.append((topic_of_quote, urljoin(quote_url, topic_url)))
+                topics.append({'topic': topic_of_quote,'url': quote_url + topic_url})
 
         if save == True:
             self._save(topics, 'topics_az.pkl')
@@ -92,13 +91,28 @@ class AzQuoteScraper(BaseScraper):
         for row in table_body.find_all('tr'):
             columns = row.find_all('td')
             author_url = row.find('a').get('href')
-            author_url = urljoin(quote_url, author_url)
+            author_url = quote_url + author_url
             name, profession, birthday = [column.text.strip() for column in columns]
-            authors_of_page.append((name, author_url, profession, birthday))
+            authors_of_page.append({'name': name,'url': author_url,'profession': profession,'birthday': birthday})
 
         if save == True:
             self._save(authors_of_page, 'authors.pkl')
         return authors_of_page
+    
+    def __find_num_of_pages(self, url):
+        response = self.get_page(url)
+        soup = self.parse_page(response)
+        pager_div = soup.find('div', class_='pager')
+        if not pager_div:
+            return 1
+        page_spans = pager_div.find('span')
+        try:
+            num_of_pages = int(page_spans.get_text().split(' ')[-1])
+        except ValueError:
+            print(f"Could not extract number of pages for page {url}")
+            num_of_pages = 1
+
+        return num_of_pages
     
     def scrape_authors(self, save=False):
         authors = []
@@ -106,9 +120,7 @@ class AzQuoteScraper(BaseScraper):
             futures = []
             for letter in ascii_lowercase:
                 author_letter_url = f'https://www.azquotes.com/quotes/authors/{letter}/'
-                response = self.get_page(author_letter_url + '1')
-                soup = self.parse_page(response)
-                num_of_pages = soup.find('div', class_='pager').find('span').get_text().split(' ')[-1]
+                num_of_pages = self.__find_num_of_pages(author_letter_url + '1')
 
                 for i in range(1, int(num_of_pages) + 1):
                     future = executor.submit(self.scrape_authors_page, letter, i)
@@ -118,16 +130,19 @@ class AzQuoteScraper(BaseScraper):
                 authors.extend(future.result())
 
         if save == True:
-            self._save(authors, 'authors.pkl')
+            self._save(authors, 'authors_az.pkl')
         return authors
     
-    def scrape_many_pages(self, url, start_page, end_page, save=False):
+    def scrape_many_pages(self, urls, start_page, end_page, save=False):
         quotes = []
+        futures = []
+        len_urls = len(urls)
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = []
-            for page in self.__generate_pages(url, start_page, end_page):
-                future = executor.submit(self.scrape_page, page)
-                futures.append(future)
+            for i, url in enumerate(urls):
+                print(i, '/', len_urls)
+                for page in self.__generate_pages(url, start_page, end_page):
+                    future = executor.submit(self.scrape_page, page)
+                    futures.append(future)
 
             for future in as_completed(futures):
                 quotes.extend(future.result())
@@ -137,13 +152,15 @@ class AzQuoteScraper(BaseScraper):
         return quotes
             
     def __generate_pages(self, url, start_page, end_page):
-        base_url = urljoin(url, '?p=')
+        num_of_pages = self.__find_num_of_pages(url)
+        end_page = num_of_pages if end_page > num_of_pages else end_page
+        base_url = f'{url}?p='
         for i in range(start_page, end_page + 1):
-            yield urljoin(base_url, str(i))
+            yield base_url + str(i)
 
 
 if __name__ == '__main__':
-    url = 'https://www.azquotes.com/quotes/topics/inspirational.html'
+    url = 'https://www.azquotes.com/quotes/authors/p/22'
     scraper = AzQuoteScraper()
-    quotes = scraper.scrape_page(url)
+    quotes = scraper.scrape_authors_page('p', 25)
     print(quotes)
