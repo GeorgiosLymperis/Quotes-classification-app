@@ -1,27 +1,36 @@
 import requests
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 import logging
 import json
 import pickle
 from datetime import datetime
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler('scraper.log', mode="a", encoding="utf-8")])
 
 class BaseScraper:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "Personal Project"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
         })
+        retries = Retry(total=5, backoff_factor=5, status_forcelist=[500, 502, 503, 504])
+        self.session.mount("https://", HTTPAdapter(max_retries=retries))
 
     def get_page(self, url):
         try:
-            page = self.session.get(url, timeout=10)
+            page = self.session.get(url, timeout=30)
             page.raise_for_status()
+            logging.info('Scrape page %s is finished', url)
             return page.text
         except requests.RequestException as e:
             logging.error("Error fetching page: %s", e)
-            return None
+            return ''
         
     def parse_page(self, page):
         soup = BeautifulSoup(page, 'html.parser')
