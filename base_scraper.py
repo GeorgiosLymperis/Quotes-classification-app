@@ -19,7 +19,7 @@ class BaseScraper:
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
         })
-        retries = Retry(total=5, backoff_factor=5, status_forcelist=[500, 502, 503, 504])
+        retries = Retry(total=5, backoff_factor=5, status_forcelist=[400, 500, 502, 503, 504])
         self.session.mount("https://", HTTPAdapter(max_retries=retries))
 
     def get_page(self, url):
