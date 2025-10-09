@@ -11,13 +11,15 @@ class GoodReadsScraper(BaseScraper):
     - Extracting topics and associated URLs
     - Multi-threaded scraping for multiple pages concurrently
     """
-    def scrape_page(self, url: str, save: bool = False)->List[Dict[str, str]]:
+
+    def scrape_page(self, url: str, save: bool = False, savepath: str = 'quotes_qr.pkl') -> List[Dict[str, str]]:
         """
         Scrapes a single page for quotes, extracting relevant details such as the quote, author, tags, and likes.
 
         Args:
             url (str): The URL of the page to scrape.
             save (bool): If True, saves the extracted quotes to a pickle file.
+            savepath (str): The path to save the extracted quotes. Must be a .pkl or .json file
 
         Returns:
             List[Dict[str, str]]: A list of dictionaries containing the quote, author, tags, and likes.
@@ -34,11 +36,13 @@ class GoodReadsScraper(BaseScraper):
                 'likes': self.get_likes(block)
             })
 
-        if save == True:
-            self._save(quotes, 'quotes_qr.pkl')
+        if save:
+            self._save(quotes, savepath)
+
         return quotes
+
     @staticmethod
-    def get_quote(block)->str:
+    def get_quote(block) -> str:
         """
         Extracts the quote text from a quote block.
 
@@ -51,7 +55,7 @@ class GoodReadsScraper(BaseScraper):
         return block.find('div', class_='quoteText').get_text(strip=True)
     
     @staticmethod
-    def get_author(block)->str:
+    def get_author(block) -> str:
         """
         Extracts the author of the quote.
 
@@ -61,11 +65,11 @@ class GoodReadsScraper(BaseScraper):
         Returns:
             str: The extracted author name, or 'Unknown' if not found.
         """
-        author_tag = block.find('span', class_='authorOrTitle').get_text(strip=True)
-        return author_tag if author_tag else 'Unknown'
+        author_tag = block.find('span', class_='authorOrTitle')
+        return author_tag.get_text(strip=True) if author_tag else 'Unknown'
 
     @staticmethod
-    def get_likes(block)->int:
+    def get_likes(block) -> int:
         """
         Extracts the number of likes for a quote.
 
@@ -76,11 +80,11 @@ class GoodReadsScraper(BaseScraper):
             int: The number of likes as an integer.
         """
         likes_box = block.find('div', class_='quoteFooter')
-        likes = likes_box.find('a', class_='smallText').get_text(strip=True)
-        return likes.split(' ')[0]
+        likes_tag = likes_box.find('a', class_='smallText') if likes_box else None
+        return int(likes_tag.get_text(strip=True).split(' ')[0]) if likes_tag else 0
     
     @staticmethod
-    def get_tags(block)->List[str]:
+    def get_tags(block) -> List[str]:
         """
         Extracts the tags associated with a quote.
 
@@ -92,11 +96,12 @@ class GoodReadsScraper(BaseScraper):
         """
         tags = []
         tags_block = block.find('div', class_='quoteFooter')
-        for tag in tags_block.find_all('a'):
-            tags.append(tag.get_text())
-        return tags[:-1]
-    
-    def scrape_many_pages(self, urls: List[str], start_page: int, end_page: int, save: bool = False)->List[Dict[str, str]]:
+        if tags_block:
+            for tag in tags_block.find_all('a'):
+                tags.append(tag.get_text())
+        return tags[:-1] if tags else []
+
+    def scrape_many_pages(self, urls: List[str], start_page: int, end_page: int, save: bool = False, savepath: str = 'quotes_qr.pkl') -> List[Dict[str, str]]:
         """
         Scrapes multiple pages concurrently and extracts quotes.
 
@@ -105,12 +110,14 @@ class GoodReadsScraper(BaseScraper):
             start_page (int): The starting page number for pagination.
             end_page (int): The last page number to scrape.
             save (bool): If True, saves the extracted data to a pickle file.
+            savepath (str): The path to save the quotes pickle file. Must be a .pkl or .json file
 
         Returns:
             List[Dict[str, str]]: A list of dictionaries containing quote data from all pages.
         """
         quotes = []
         futures = []
+
         with ThreadPoolExecutor(max_workers=10) as executor:
             for url in urls:
                 for page in self.__generate_pages(url, start_page, end_page):
@@ -120,17 +127,18 @@ class GoodReadsScraper(BaseScraper):
             for future in as_completed(futures):
                 quotes.extend(future.result())
 
-        if save == True:
-            self._save(quotes, 'quotes_qr.pkl')
+        if save:
+            self._save(quotes, savepath)
 
         return quotes
     
-    def scrape_topics(self, save: bool = False)->List[Dict[str, str]]:
+    def scrape_topics(self, save: bool = False, savepath: str = 'topics_qr.pkl') -> List[Dict[str, str]]:
         """
         Scrapes all available topics from Goodreads and their URLs.
 
         Args:
             save (bool): If True, saves the extracted topics to a pickle file.
+            savepath (str): The path to save the topics pickle file. Must be a .pkl or .json file
 
         Returns:
             List[Dict[str, str]]: A list of dictionaries containing topic names and URLs.
@@ -139,14 +147,16 @@ class GoodReadsScraper(BaseScraper):
         response = self.get_page(url)
         soup = self.parse_page(response)
         topics = []
+
         for topic in soup.find_all('li', class_='greyText'):
             topic_of_quote = topic.get_text(strip=True).split(' ')[0]
             topic_url = topic.find('a').get('href')
             topic_url = 'https://www.goodreads.com' + topic_url
-            topics.append({'topic': topic_of_quote,'url': topic_url})
+            topics.append({'topic': topic_of_quote, 'url': topic_url})
 
-        if save == True:
-            self._save(topics, 'topics_qr.pkl')
+        if save:
+            self._save(topics, savepath)
+
         return topics
     
     def __generate_pages(self, url: str, start_page: int, end_page: int):
