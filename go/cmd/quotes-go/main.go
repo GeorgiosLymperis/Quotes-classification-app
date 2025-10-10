@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/GeorgiosLymperis/quote_app/internal/scraper"
+	"github.com/GeorgiosLymperis/Quotes-classification-app/internal/scraper"
 )
 
 func main() {
