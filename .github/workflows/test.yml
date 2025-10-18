@@ -1,4 +1,4 @@
-name: Go Tests
+name: Go CI
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [ main, master ]
 
 jobs:
-  test:
+  build-test-lint:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,10 +19,23 @@ jobs:
         with:
           go-version: '1.24.5'
 
-      - name: Change to Go project directory
-        run: cd go
+      - name: Cache Go modules & build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('go/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
-      - name: Run Go tests
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: ./go
+
+      - name: Run tests (race detector)
         working-directory: ./go
         run: |
           go mod tidy
@@ -31,3 +44,4 @@ jobs:
       - name: Show coverage summary
         working-directory: ./go
         run: go test -cover ./internal/scraper
+
