@@ -1,0 +1,33 @@
+name: Go Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.5'
+
+      - name: Change to Go project directory
+        run: cd go
+
+      - name: Run Go tests
+        working-directory: ./go
+        run: |
+          go mod tidy
+          go test -v -race ./...
+
+      - name: Show coverage summary
+        working-directory: ./go
+        run: go test -cover ./internal/scraper
