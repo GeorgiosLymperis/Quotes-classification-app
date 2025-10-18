@@ -4,9 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
-	"strings"
 
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -14,6 +14,19 @@ import (
 	"github.com/GeorgiosLymperis/Quotes-classification-app/internal/scraper"
 )
 
+// main is the entrypoint for the quotes scraping CLI.
+// It supports scraping from azquotes, goodreads, and famousquotes concurrently,
+// writing results to a JSONL file.
+//
+// Flags:
+//
+//	-site      : target site ("azquotes" | "goodreads" | "famousquotes")
+//	-start     : start page index (for paginated sites)
+//	-end       : end page index (for paginated sites)
+//	-out       : output JSONL filepath
+//	-topic     : single topic (e.g., "life")
+//	-topics    : comma-separated topics (e.g., "life,love,success")
+//	-workers   : maximum concurrent requests
 func main() {
 	site := flag.String("site", "azquotes", "site to scrape (azquotes|goodreads|famousquotes)")
 	start := flag.Int("start", 1, "start page")
@@ -24,6 +37,7 @@ func main() {
 	workers := flag.Int("workers", 8, "max concurrency")
 	flag.Parse()
 
+	// Build topic list from flags.
 	var topicList []string
 	if *topics != "" {
 		for _, t := range strings.Split(*topics, ",") {
@@ -42,11 +56,11 @@ func main() {
 	fmt.Printf("site=%s start=%d end=%d out=%s workers=%d\n",
 		*site, *start, *end, *out, *workers)
 
-	// Client με retries + backoff
+	// HTTP client with retries + backoff.
 	client := scraper.NewClient(
 		30*time.Second,
 		"Mozilla/5.0 (QuoteApp)",
-		5,              // retries
+		5,                    // retries
 		500*time.Millisecond, // base backoff
 		10*time.Second,       // max backoff
 	)
@@ -54,22 +68,26 @@ func main() {
 	switch *site {
 	case "azquotes":
 		if err := runAZQuotesConcurrent(client, topicList, *start, *end, *out, *workers); err != nil {
-    	fmt.Println("run error:", err)
-	}
+			fmt.Println("run error:", err)
+		}
 	case "goodreads":
 		if err := runGoodReadsConcurrent(client, topicList, *start, *end, *out, *workers); err != nil {
-    	fmt.Println("run error:", err)
-	}
+			fmt.Println("run error:", err)
+		}
 	case "famousquotes":
 		if err := runFamousQuotesConcurrent(client, topicList, *out, *workers); err != nil {
-    	fmt.Println("run error:", err)
-	}
+			fmt.Println("run error:", err)
+		}
 	default:
 		fmt.Println("unsupported site:", *site)
 	}
 }
 
-
+// runAZQuotesConcurrent scrapes AZQuotes for the given topics across a page range,
+// using a weighted semaphore for concurrency limiting, and writes the aggregated
+// records to a JSONL file.
+//
+// It logs per-URL progress and continues on per-URL errors (best-effort scraping).
 func runAZQuotesConcurrent(client *scraper.Client, topics []string, start, end int, out string, workers int) error {
 	s := scraper.NewAZQuoteScraper(client)
 
@@ -87,27 +105,31 @@ func runAZQuotesConcurrent(client *scraper.Client, topics []string, start, end i
 			url := fmt.Sprintf("https://www.azquotes.com/quotes/topics/%s.html?p=%d", topic, p)
 			urls = append(urls, url)
 		}
-}
+	}
 
 	for _, url := range urls {
-    if err := sem.Acquire(ctx, 1); err != nil { return err }
+		// Rebind loop variable to avoid goroutine capture issue.
+		u := url
 
-    g.Go(func() error {
-        defer sem.Release(1)
+		if err := sem.Acquire(ctx, 1); err != nil {
+			return err
+		}
+		g.Go(func() error {
+			defer sem.Release(1)
 
-        recs, err := s.ScrapePageCtx(ctx, url)
-        if err != nil {
-            fmt.Println("error:", err, "url:", url)
-            return nil // keep going
-        }
-        fmt.Println( "done:", url, "records:", len(recs))
+			recs, err := s.ScrapePageCtx(ctx, u)
+			if err != nil {
+				fmt.Println("error:", err, "url:", u)
+				return nil // continue other URLs
+			}
+			fmt.Println("done:", u, "records:", len(recs))
 
-        mu.Lock()
-        all = append(all, recs...)
-        mu.Unlock()
-        return nil
-    })
-}
+			mu.Lock()
+			all = append(all, recs...)
+			mu.Unlock()
+			return nil
+		})
+	}
 
 	if err := g.Wait(); err != nil {
 		return err
@@ -120,6 +142,8 @@ func runAZQuotesConcurrent(client *scraper.Client, topics []string, start, end i
 	return nil
 }
 
+// runGoodReadsConcurrent scrapes Goodreads tag pages for the given topics and page range,
+// aggregating results and writing them to a JSONL file.
 func runGoodReadsConcurrent(client *scraper.Client, topics []string, start, end int, out string, workers int) error {
 	s := scraper.NewAGoodReadsScraper(client)
 
@@ -137,27 +161,30 @@ func runGoodReadsConcurrent(client *scraper.Client, topics []string, start, end 
 			url := fmt.Sprintf("https://www.goodreads.com/quotes/tag/%s?page=%d", topic, p)
 			urls = append(urls, url)
 		}
-}
+	}
 
 	for _, url := range urls {
-    if err := sem.Acquire(ctx, 1); err != nil { return err }
+		u := url // avoid goroutine capture
 
-    g.Go(func() error {
-        defer sem.Release(1)
+		if err := sem.Acquire(ctx, 1); err != nil {
+			return err
+		}
+		g.Go(func() error {
+			defer sem.Release(1)
 
-        recs, err := s.ScrapePageCtx(ctx, url)
-        if err != nil {
-            fmt.Println("error:", err, "url:", url)
-            return nil // keep going
-        }
-        fmt.Println( "done:", url, "records:", len(recs))
+			recs, err := s.ScrapePageCtx(ctx, u)
+			if err != nil {
+				fmt.Println("error:", err, "url:", u)
+				return nil // continue other URLs
+			}
+			fmt.Println("done:", u, "records:", len(recs))
 
-        mu.Lock()
-        all = append(all, recs...)
-        mu.Unlock()
-        return nil
-    })
-}
+			mu.Lock()
+			all = append(all, recs...)
+			mu.Unlock()
+			return nil
+		})
+	}
 
 	if err := g.Wait(); err != nil {
 		return err
@@ -170,6 +197,8 @@ func runGoodReadsConcurrent(client *scraper.Client, topics []string, start, end 
 	return nil
 }
 
+// runFamousQuotesConcurrent scrapes one page per topic from FamousQuotesAndAuthors,
+// aggregates the results, and writes them to a JSONL file.
 func runFamousQuotesConcurrent(client *scraper.Client, topics []string, out string, workers int) error {
 	s := scraper.NewFamousQuotesScraper(client)
 
@@ -183,29 +212,32 @@ func runFamousQuotesConcurrent(client *scraper.Client, topics []string, out stri
 	all := make([]scraper.QuoteRecord, 0, 4*25)
 	urls := make([]string, 0, len(topics))
 	for _, topic := range topics {
-			url := fmt.Sprintf("http://www.famousquotesandauthors.com/topics/%s_quotes.html", topic)
-			urls = append(urls, url)
-}
+		url := fmt.Sprintf("http://www.famousquotesandauthors.com/topics/%s_quotes.html", topic)
+		urls = append(urls, url)
+	}
 
 	for _, url := range urls {
-    if err := sem.Acquire(ctx, 1); err != nil { return err }
+		u := url // avoid goroutine capture
 
-    g.Go(func() error {
-        defer sem.Release(1)
+		if err := sem.Acquire(ctx, 1); err != nil {
+			return err
+		}
+		g.Go(func() error {
+			defer sem.Release(1)
 
-        recs, err := s.ScrapePageCtx(ctx, url)
-        if err != nil {
-            fmt.Println("error:", err, "url:", url)
-            return nil // keep going
-        }
-        fmt.Println( "done:", url, "records:", len(recs))
+			recs, err := s.ScrapePageCtx(ctx, u)
+			if err != nil {
+				fmt.Println("error:", err, "url:", u)
+				return nil // continue other URLs
+			}
+			fmt.Println("done:", u, "records:", len(recs))
 
-        mu.Lock()
-        all = append(all, recs...)
-        mu.Unlock()
-        return nil
-    })
-}
+			mu.Lock()
+			all = append(all, recs...)
+			mu.Unlock()
+			return nil
+		})
+	}
 
 	if err := g.Wait(); err != nil {
 		return err

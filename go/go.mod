@@ -1,4 +1,4 @@
-module github.com/GeorgiosLymperis/quote_app
+module github.com/GeorgiosLymperis/Quotes-classification-app
 
 go 1.24.5
 

@@ -12,22 +12,29 @@ import (
 )
 
 type classifyRequest struct {
-	Text string `json:"text"`
-	Probs map[string]float64 `json:"probs"`
-	ModelVersion string `json:"model_version"`
+	Text         string             `json:"text"`
+	Probs        map[string]float64 `json:"probs"`
+	ModelVersion string             `json:"model_version"`
 }
 
+// main starts a tiny HTTP gateway that proxies /classify requests
+// to an upstream ML service (ML_URL) and serves a minimal HTML UI.
+// Configuration:
+//   - GATEWAY_ADDRESS (default ":8080")
+//   - ML_URL (default "http://localhost:8000")
 func main() {
 	address := env("GATEWAY_ADDRESS", ":8080")
 	mlURL := env("ML_URL", "http://localhost:8000")
 	mux := http.NewServeMux()
 
+	// Health probe endpoint.
 	mux.HandleFunc("/health", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Write([]byte(`{"status":"ok"}`))
 	})
 
-	mux.HandleFunc("/classify", func(writer http.ResponseWriter, request *http.Request){
+	// /classify proxies JSON to the upstream ML service.
+	mux.HandleFunc("/classify", func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost {
 			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -41,25 +48,28 @@ func main() {
 		}
 
 		body, _ := json.Marshal(in)
-		responseBody, status, err := postJSON(mlURL + "/classify", body, 5*time.Second)
+		responseBody, status, err := postJSON(mlURL+"/classify", body, 5*time.Second)
 		if err != nil {
+			// NOTE: returns 400 on upstream failure; consider 502 Bad Gateway.
 			http.Error(writer, "ml service unavailable: "+err.Error(), http.StatusBadRequest)
+			return
 		}
+
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(status)
 		writer.Write(responseBody)
 	})
 
+	// Root serves a tiny interactive HTML UI.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(makeHTML()))
-})
-
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(makeHTML()))
+	})
 
 	server := &http.Server{
-		Addr: address,
-		Handler: mux,
-		ReadHeaderTimeout: 5*time.Second,
+		Addr:              address,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	fmt.Println("gateway listening on", address, "-> ML:", mlURL)
@@ -68,6 +78,7 @@ func main() {
 	}
 }
 
+// makeHTML returns the embedded single-file UI for manual testing.
 func makeHTML() string {
 	return `<!doctype html>
 <html>
@@ -141,7 +152,6 @@ btn.addEventListener('click', async () => {
       row.className = 'row';
       row.style.margin = '6px 0';
 
-      // build inner HTML without backticks (safe inside Go raw string)
       row.innerHTML =
         '<div class="legend">' + label +
         '<span class="pct">' + percent + '%</span></div>' +
@@ -162,6 +172,7 @@ btn.addEventListener('click', async () => {
 </html>`
 }
 
+// env retrieves an environment variable or returns a default value.
 func env(key, defaultKey string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -169,24 +180,27 @@ func env(key, defaultKey string) string {
 	return defaultKey
 }
 
+// postJSON posts a JSON body to the given URL with a short timeout,
+// returning the response body, status code, and any network error.
 func postJSON(url string, body []byte, timeout time.Duration) ([]byte, int, error) {
 	client := &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
-			DialContext: (&net.Dialer{Timeout: 3*time.Second}).DialContext,
-			MaxIdleConns: 100,
+			DialContext:         (&net.Dialer{Timeout: 3 * time.Second}).DialContext,
+			MaxIdleConns:        100,
 			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout: 90*time.Second,
+			IdleConnTimeout:     90 * time.Second,
 		},
 	}
 	request, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 
 	response, err := client.Do(request)
-
-	if err != nil {return nil, 0, err}
-
+	if err != nil {
+		return nil, 0, err
+	}
 	defer response.Body.Close()
+
 	b, _ := io.ReadAll(response.Body)
 	return b, response.StatusCode, nil
 }
