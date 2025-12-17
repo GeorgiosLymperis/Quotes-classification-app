@@ -4,10 +4,33 @@ An end-to-end **Machine Learning system** for large-scale quote ingestion, **top
 
 ---
 
+## Business Problem
+
+Modern organizations deal with **large volumes of unstructured text content**, such as quotes, short messages, marketing copy, notifications, or user-generated text. Two recurring challenges arise:
+
+1. **Content Classification at Scale**  
+   Text needs to be reliably categorized to enable:
+   - content routing
+   - personalization
+   - analytics
+   - downstream automation
+
+   Manual labeling does not scale, while uncontrolled NLP models introduce inconsistency and risk.
+
+2. **Controlled Text Generation**  
+   Businesses increasingly want to **generate short-form text automatically**, but:
+   - generic language models lack topic control
+   - outputs are hard to validate
+   - off-topic or low-quality text creates brand and product risk
+
+This project addresses both problems by combining **deterministic data ingestion**, **supervised classification**, and **validated text generation** into a single, production-oriented ML system.
+
+---
+
 ## Examples
 
-<video src="assets/Recording 2025-12-16 011232.mp4" controls width="600"></video>
-<video src="assets/Recording 2025-12-16 012038.mp4" controls width="600"></video>
+<video src="assets/generation.mp4" controls width="600"></video>
+<video src="assets/classifier.mp4" controls width="600"></video>
 ---
 
 ## System Architecture
@@ -145,3 +168,13 @@ and open
 ```
 http://localhost:8080
 ```
+
+---
+
+## Running with Docker
+
+`docker-compose up --build`
+
+Open the UI in your browser
+
+`http://localhost:8080`
