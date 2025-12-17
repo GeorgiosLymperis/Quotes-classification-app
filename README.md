@@ -29,8 +29,9 @@ This project addresses both problems by combining **deterministic data ingestion
 
 ## Examples
 
-<video src="assets/generation.mp4" controls width="600"></video>
-<video src="assets/classifier.mp4" controls width="600"></video>
+![Classification Demo](assets/classifier.gif)
+
+![Generation Demo](assets/generation.gif)
 ---
 
 ## System Architecture
