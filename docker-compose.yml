@@ -1,0 +1,27 @@
+services:
+  ml-service:
+    build:
+      context: .
+      dockerfile: ml_service/Dockerfile
+    container_name: quote-ml-service
+    ports:
+      - "8000:8000"
+    environment:
+      MODEL_VERSION: "v1"
+    volumes:
+      - ./ml_service/models:/app/models
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: go/cmd/quotes-api/Dockerfile
+    container_name: quote-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      ML_URL: "http://ml-service:8000"
+      GATEWAY_ADDRESS: ":8080"
+    depends_on:
+      - ml-service
+    restart: unless-stopped
