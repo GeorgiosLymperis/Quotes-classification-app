@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,44 +28,12 @@ func main() {
 	mlURL := env("ML_URL", "http://localhost:8000")
 	mux := http.NewServeMux()
 
-	// Health probe endpoint.
-	mux.HandleFunc("/health", func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Content-Type", "application/json")
-		writer.Write([]byte(`{"status":"ok"}`))
-	})
+	client := newHTTPClient()
 
-	// /classify proxies JSON to the upstream ML service.
-	mux.HandleFunc("/classify", func(writer http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodPost {
-			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		defer request.Body.Close()
-		var in classifyRequest
-		if err := json.NewDecoder(request.Body).Decode(&in); err != nil {
-			http.Error(writer, "bad request", http.StatusBadRequest)
-			return
-		}
-
-		body, _ := json.Marshal(in)
-		responseBody, status, err := postJSON(mlURL+"/classify", body, 5*time.Second)
-		if err != nil {
-			// NOTE: returns 400 on upstream failure; consider 502 Bad Gateway.
-			http.Error(writer, "ml service unavailable: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		writer.Header().Set("Content-Type", "application/json")
-		writer.WriteHeader(status)
-		writer.Write(responseBody)
-	})
-
-	// Root serves a tiny interactive HTML UI.
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(makeHTML()))
-	})
+	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/classify", classifyHandler(client, mlURL))
+	mux.HandleFunc("/generate", generateHandler(client, mlURL))
+	mux.HandleFunc("/", rootHandler)
 
 	server := &http.Server{
 		Addr:              address,
@@ -78,6 +47,89 @@ func main() {
 	}
 }
 
+func newHTTPClient() *http.Client {
+	transport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout: 3 * time.Second,
+		}).DialContext,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+	}
+
+	return &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: transport,
+	}
+}
+
+func healthHandler(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status":"ok"}`))
+}
+
+func classifyHandler(client *http.Client, mlURL string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		defer r.Body.Close()
+
+		var in classifyRequest
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+
+		body, err := json.Marshal(in)
+		if err != nil {
+			http.Error(w, "failed to encode request", http.StatusInternalServerError)
+			return
+		}
+
+		respBody, status, err := postJSON(r.Context(), client, mlURL+"/classify", body)
+		if err != nil {
+			http.Error(w, "ml service unavailable: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		w.Write(respBody)
+	}
+}
+
+func generateHandler(client *http.Client, mlURL string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		defer r.Body.Close()
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed to read request body", http.StatusBadRequest)
+			return
+		}
+
+		respBody, status, err := postJSON(r.Context(), client, mlURL+"/generate", body)
+		if err != nil {
+			http.Error(w, "ml service unavailable: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		w.Write(respBody)
+	}
+}
+
+func rootHandler(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(makeHTML()))
+}
 // makeHTML returns the embedded single-file UI for manual testing.
 func makeHTML() string {
 	return `<!doctype html>
@@ -87,90 +139,197 @@ func makeHTML() string {
 <title>Quote Classifier</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; }
-  textarea { width: 100%; min-height: 130px; font-size: 16px; padding: 12px; }
-  button { padding: 10px 14px; margin-top: 8px; font-size: 15px; cursor: pointer; }
-  .row { display: flex; gap: 12px; align-items: center; }
-  .label { font-weight: 600; }
-  /* probs styles */
-  #probs { margin-top: 8px; max-width: 460px; }
-  #probs .row { display: block; }
-  #probs .barwrap { background:#eee; border-radius:4px; overflow:hidden; height:12px; }
-  #probs .legend { font-weight:600; margin-bottom:2px; }
-  #probs .pct { float:right; font-size:13px; color:#444; }
+  body {
+    font-family: system-ui, sans-serif;
+    max-width: 720px;
+    margin: 40px auto;
+    padding: 0 16px;
+  }
+  textarea {
+    width: 100%;
+    min-height: 130px;
+    font-size: 16px;
+    padding: 12px;
+  }
+  button {
+    padding: 10px 14px;
+    margin-top: 8px;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  select {
+    padding: 8px;
+    font-size: 14px;
+  }
+  .row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-top: 8px;
+  }
+  .label {
+    font-weight: 600;
+  }
+  #probs {
+    margin-top: 12px;
+    max-width: 460px;
+  }
+  .barwrap {
+    background: #eee;
+    border-radius: 4px;
+    overflow: hidden;
+    height: 12px;
+  }
+  .legend {
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+  .pct {
+    float: right;
+    font-size: 13px;
+    color: #444;
+  }
 </style>
 </head>
+
 <body>
 <h1>Quote Classifier</h1>
-<p>Give a quote and click "Classify".</p>
+<p>Enter text to classify, or generate a quote by topic.</p>
 
 <textarea id="txt" placeholder="e.g., The only source of knowledge is experience."></textarea>
+
 <div class="row">
-  <button id="btn">Classify</button>
+  <button id="btn-classify">Classify</button>
+
+  <select id="topic">
+    <option value="Inspirational">Inspirational</option>
+    <option value="Philosophical">Philosophical</option>
+    <option value="Love">Love</option>
+    <option value="Romantic">Romantic</option>
+    <option value="Humor">Humor</option>
+  </select>
+
+  <button id="btn-generate">Generate</button>
   <span id="status"></span>
 </div>
 
 <h3>Result</h3>
-<div class="row"><span class="label">Top label:</span> <span id="label">—</span></div>
+<div class="row">
+  <span class="label">Top label:</span>
+  <span id="label">—</span>
+</div>
+
 <h4>Probabilities</h4>
 <div id="probs"></div>
 
 <script>
-const btn = document.getElementById('btn');
 const txt = document.getElementById('txt');
+const classifyBtn = document.getElementById('btn-classify');
+const generateBtn = document.getElementById('btn-generate');
+const topicSel = document.getElementById('topic');
 const labelEl = document.getElementById('label');
 const statusEl = document.getElementById('status');
 const probsDiv = document.getElementById('probs');
 
-btn.addEventListener('click', async () => {
+/* -------------------------
+   CLASSIFY
+------------------------- */
+classifyBtn.addEventListener('click', async () => {
   const text = txt.value.trim();
-  if (!text) { alert('Give me a quote first.'); return; }
-  statusEl.textContent = '⏳ classifying...';
+  if (!text) {
+    alert('Please enter text to classify.');
+    return;
+  }
+
+  statusEl.textContent = 'classifying...';
   probsDiv.innerHTML = '';
+  labelEl.textContent = '—';
+
   try {
     const res = await fetch('/classify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text })
     });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+
+    if (!res.ok) {
+      throw new Error('HTTP ' + res.status);
+    }
+
     const data = await res.json();
 
-    // set top label
     labelEl.textContent = data.label || '—';
 
-    // render colorful bars
     const probs = data.probs || {};
-    const entries = Object.entries(probs); // [["Inspirational", 0.8271], ...]
     probsDiv.innerHTML = '';
-    entries.forEach(([label, p]) => {
-      const percent = (p * 100).toFixed(1);
-      const hue = Math.round(120 * p);           // 0=red .. 120=green
-      const color = 'hsl(' + hue + ',70%,50%)';  // vivid, readable
+
+    Object.entries(probs).forEach(([label, p]) => {
+      const percent = Math.round(p * 1000) / 10;
 
       const row = document.createElement('div');
-      row.className = 'row';
       row.style.margin = '6px 0';
 
       row.innerHTML =
         '<div class="legend">' + label +
         '<span class="pct">' + percent + '%</span></div>' +
-        '<div class="barwrap"><div class="bar" ' +
-        'style="width:' + percent + '%; height:100%; background:' + color + '; transition:width 0.6s ease;"></div></div>';
+        '<div class="barwrap">' +
+        '<div style="width:' + percent + '%; height:100%; background:#4c8bf5;"></div>' +
+        '</div>';
 
       probsDiv.appendChild(row);
     });
 
-    statusEl.textContent = '✅';
-  } catch (e) {
-    statusEl.textContent = '❌';
-    alert('Error: ' + e.message);
+    statusEl.textContent = 'done';
+  } catch (err) {
+    statusEl.textContent = 'error';
+    alert('Classification failed: ' + err.message);
+  }
+});
+
+/* -------------------------
+   GENERATE
+------------------------- */
+generateBtn.addEventListener('click', async () => {
+  const topic = topicSel.value;
+
+  statusEl.textContent = 'generating...';
+  probsDiv.innerHTML = '';
+  labelEl.textContent = '—';
+
+  try {
+    const res = await fetch('/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic: topic,
+        min_confidence: 0.6
+      })
+    });
+
+    if (!res.ok) {
+      throw new Error('HTTP ' + res.status);
+    }
+
+    const data = await res.json();
+
+    txt.value = data.quote || '';
+    labelEl.textContent = topic;
+    statusEl.textContent =
+      data.confidence !== undefined
+        ? 'confidence ' + Math.round(data.confidence * 1000) / 10 + '%'
+        : 'done';
+
+  } catch (err) {
+    statusEl.textContent = 'error';
+    alert('Generation failed: ' + err.message);
   }
 });
 </script>
+
 </body>
 </html>`
 }
+
 
 // env retrieves an environment variable or returns a default value.
 func env(key, defaultKey string) string {
@@ -182,25 +341,34 @@ func env(key, defaultKey string) string {
 
 // postJSON posts a JSON body to the given URL with a short timeout,
 // returning the response body, status code, and any network error.
-func postJSON(url string, body []byte, timeout time.Duration) ([]byte, int, error) {
-	client := &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			DialContext:         (&net.Dialer{Timeout: 3 * time.Second}).DialContext,
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
-		},
-	}
-	request, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
+func postJSON(
+	ctx context.Context,
+	client *http.Client,
+	url string,
+	body []byte,
+) ([]byte, int, error) {
 
-	response, err := client.Do(request)
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		url,
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer response.Body.Close()
+	req.Header.Set("Content-Type", "application/json")
 
-	b, _ := io.ReadAll(response.Body)
-	return b, response.StatusCode, nil
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return b, resp.StatusCode, nil
 }

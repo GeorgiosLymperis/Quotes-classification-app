@@ -6,18 +6,21 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from fastapi import FastAPI
 from pydantic import BaseModel
+from generator import QuoteGenerator
 from typing import Dict
 
-MODEL_DIR = os.getenv("MODEL_DIR", "./model")
+CLF_DIR = "./models/classifier"
+GENERATOR_DIR = "./models/generator"
 
 app = FastAPI()
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR, use_fast=True)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR)
+tokenizer = AutoTokenizer.from_pretrained(CLF_DIR, use_fast=True)
+model = AutoModelForSequenceClassification.from_pretrained(CLF_DIR)
 model.eval()
+generator = QuoteGenerator(GENERATOR_DIR, CLF_DIR)
 
 id2label = getattr(model.config, "id2label", None)
-print(id2label)
+
 if id2label and isinstance(id2label, dict) and len(id2label) > 0:
     labels = [id2label[i] if i in id2label else id2label[str(i)] for i in range(len(id2label))]
 else:
@@ -28,6 +31,22 @@ else:
 
 class Input(BaseModel):
     text: str
+
+class GenerateRequest(BaseModel):
+    topic: str
+    min_confidence: float = 0.6
+    max_attempts: int = 5
+    temperature: float = 0.8
+    top_p: float = 0.9
+    max_length: int = 40
+
+
+class GenerateResponse(BaseModel):
+    quote: str
+    confidence: float
+    accepted: bool
+    attempts: int
+
 
 @app.get("/health")
 def health():
@@ -50,3 +69,15 @@ def classify(user_input: Input) -> Dict:
         },
         "model_version": os.getenv("MODEL_VERSION", "v1")
     }
+
+@app.post("/generate", response_model=GenerateResponse)
+def generate_quote(req: GenerateRequest):
+    result = generator.generate(
+        topic=req.topic,
+        min_confidence=req.min_confidence,
+        max_attempts=req.max_attempts,
+        temperature=req.temperature,
+        top_p=req.top_p,
+        max_length=req.max_length,
+    )
+    return result
